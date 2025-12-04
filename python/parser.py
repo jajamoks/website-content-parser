@@ -341,7 +341,7 @@ class HTMLParser:
         # Image
         elif tag_name == "img":
             # Handle lazy loading: check multiple possible src attributes
-            # Priority: data-amsrc, data-src, data-lazy-src, data-original, data-lazy, then src (but skip base64)
+            # Priority: data-amsrc, data-src, data-lazy-src, data-original, data-lazy, srcset, then src
             src = (
                 element.get("data-amsrc")
                 or element.get("data-src")
@@ -350,20 +350,29 @@ class HTMLParser:
                 or element.get("data-lazy")
             )
 
-            # Check src only if it's not a data URI
+            # Check parent picture element for source srcset
+            if not src:
+                parent_elem = element.parent
+                if parent_elem and parent_elem.name == "picture":
+                    source = parent_elem.find("source")
+                    if source:
+                        src = source.get("data-srcset") or source.get("srcset")
+                        if src and "," in src:
+                            src = src.split(",")[0].strip().split(" ")[0]
+
+            # Check srcset on img itself
+            if not src:
+                srcset = element.get("srcset") or element.get("data-srcset")
+                if srcset:
+                    src = srcset.split(",")[0].strip().split(" ")[0]
+
+            # Finally check src (skip data URIs)
             if not src:
                 src_attr = element.get("src")
                 if src_attr and not src_attr.startswith("data:"):
                     src = src_attr
 
-            # If still no src, check srcset
-            if not src:
-                srcset = element.get("srcset") or element.get("data-srcset")
-                if srcset:
-                    # Extract first URL from srcset
-                    src = srcset.split(",")[0].strip().split(" ")[0]
-
-            # Filter out data URIs (base64, svg, etc.)
+            # If still no valid src found, skip this image
             if not src or src.startswith("data:"):
                 return None
 
@@ -379,49 +388,10 @@ class HTMLParser:
                 attributes=attributes,
             )
 
-        # Picture elements
+        # Picture elements - skip and let img children be parsed
         elif tag_name == "picture":
-            source = element.find("source")
-            img = element.find("img")
-
-            # Try source data-srcset first
-            src = None
-            if source:
-                src = source.get("data-srcset") or source.get("srcset")
-
-            # Then try img attributes (prioritize data-amsrc and other lazy loading attrs)
-            if not src and img:
-                src = (
-                    img.get("data-amsrc")
-                    or img.get("data-src")
-                    or img.get("data-lazy-src")
-                    or img.get("data-original")
-                )
-
-                # Only use src if it's not a data URI
-                if not src:
-                    img_src = img.get("src")
-                    if img_src and not img_src.startswith("data:"):
-                        src = img_src
-
-            if not src or src.startswith("data:"):
-                return None
-
-            # If srcset, get first URL
-            if "," in src:
-                src = src.split(",")[0].strip().split(" ")[0]
-
-            return ImageBlock(
-                id=block_id,
-                type=BlockType.IMAGE,
-                order=order,
-                parent=parent,
-                src=src,
-                alt=img.get("alt") if img else None,
-                width=self._parse_int(img.get("width")) if img else None,
-                height=self._parse_int(img.get("height")) if img else None,
-                attributes=attributes,
-            )
+            children = self._parse_element(element, depth + 1, block_id)
+            return children[0] if children else None
 
         # Video
         elif tag_name == "video":

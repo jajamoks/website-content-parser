@@ -231,14 +231,36 @@ export class HTMLParser {
 
       case 'img': {
         // Handle lazy loading: check multiple possible src attributes
-        // Priority: data-amsrc, data-src, data-lazy-src, data-original, data-lazy, then src (but skip base64)
+        // Priority: data-amsrc, data-src, data-lazy-src, data-original, data-lazy, srcset, then src
         let src = element.attr('data-amsrc')
           || element.attr('data-src')
           || element.attr('data-lazy-src')
           || element.attr('data-original')
           || element.attr('data-lazy');
 
-        // Check src only if it's not a data URI
+        // Check parent picture element for source srcset
+        if (!src) {
+          const parent = element.parent();
+          if (parent && parent.prop('tagName')?.toLowerCase() === 'picture') {
+            const source = parent.find('source').first();
+            if (source.length) {
+              src = source.attr('data-srcset') || source.attr('srcset');
+              if (src && src.includes(',')) {
+                src = src.split(',')[0].trim().split(' ')[0];
+              }
+            }
+          }
+        }
+
+        // Check srcset on img itself
+        if (!src) {
+          const srcset = element.attr('srcset') || element.attr('data-srcset');
+          if (srcset) {
+            src = srcset.split(',')[0].trim().split(' ')[0];
+          }
+        }
+
+        // Finally check src (skip data URIs)
         if (!src) {
           const srcAttr = element.attr('src');
           if (srcAttr && !srcAttr.startsWith('data:')) {
@@ -246,16 +268,7 @@ export class HTMLParser {
           }
         }
 
-        // If still no src, check srcset
-        if (!src) {
-          const srcset = element.attr('srcset') || element.attr('data-srcset');
-          if (srcset) {
-            // Extract first URL from srcset
-            src = srcset.split(',')[0].trim().split(' ')[0];
-          }
-        }
-
-        // Filter out data URIs (base64, svg, etc.)
+        // If still no valid src found, skip this image
         if (!src || src.startsWith('data:')) return null;
 
         return {
@@ -272,48 +285,9 @@ export class HTMLParser {
       }
 
       case 'picture': {
-        // Handle picture elements
-        const $picture = element;
-        const source = $picture.find('source').first();
-        const img = $picture.find('img').first();
-
-        // Try source data-srcset first
-        let src = source.attr('data-srcset') || source.attr('srcset');
-
-        // Then try img attributes (prioritize data-amsrc and other lazy loading attrs)
-        if (!src && img.length) {
-          src = img.attr('data-amsrc')
-            || img.attr('data-src')
-            || img.attr('data-lazy-src')
-            || img.attr('data-original');
-
-          // Only use src if it's not a data URI
-          if (!src) {
-            const imgSrc = img.attr('src');
-            if (imgSrc && !imgSrc.startsWith('data:')) {
-              src = imgSrc;
-            }
-          }
-        }
-
-        if (!src || src.startsWith('data:')) return null;
-
-        // If srcset, get first URL
-        if (src.includes(',')) {
-          src = src.split(',')[0].trim().split(' ')[0];
-        }
-
-        return {
-          id,
-          type: 'image',
-          src,
-          alt: img.attr('alt'),
-          width: this.parseNumber(img.attr('width')),
-          height: this.parseNumber(img.attr('height')),
-          order,
-          parent,
-          attributes: this.options.includeAttributes ? this.getAttributes($picture) : {},
-        } as ImageBlock;
+        // Skip picture elements - we'll parse the img inside them directly
+        const children = this.parseElement($, element, depth + 1, parent);
+        return children.length > 0 ? children[0] : null;
       }
 
       case 'video': {
