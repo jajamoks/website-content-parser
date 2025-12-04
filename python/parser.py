@@ -200,7 +200,7 @@ class HTMLParser:
             soup.find("main")
             or soup.find(attrs={"role": "main"})
             or soup.find("article")
-            or soup.find(class_=["post-content", "blog-content", "entry-content", "content-area"])
+            or soup.find(class_=["post-content", "blog-content", "entry-content", "content-area", "blog__post-content-wrapper"])
             or soup.find("body")
         )
 
@@ -341,13 +341,20 @@ class HTMLParser:
         # Image
         elif tag_name == "img":
             # Handle lazy loading: check multiple possible src attributes
+            # Priority: data-amsrc, data-src, data-lazy-src, data-original, data-lazy, then src (but skip base64)
             src = (
-                element.get("src")
+                element.get("data-amsrc")
                 or element.get("data-src")
                 or element.get("data-lazy-src")
                 or element.get("data-original")
                 or element.get("data-lazy")
             )
+
+            # Check src only if it's not a data URI
+            if not src:
+                src_attr = element.get("src")
+                if src_attr and not src_attr.startswith("data:"):
+                    src = src_attr
 
             # If still no src, check srcset
             if not src:
@@ -356,7 +363,8 @@ class HTMLParser:
                     # Extract first URL from srcset
                     src = srcset.split(",")[0].strip().split(" ")[0]
 
-            if not src or src.startswith("data:image/svg"):
+            # Filter out data URIs (base64, svg, etc.)
+            if not src or src.startswith("data:"):
                 return None
 
             return ImageBlock(
@@ -376,13 +384,27 @@ class HTMLParser:
             source = element.find("source")
             img = element.find("img")
 
+            # Try source data-srcset first
             src = None
             if source:
-                src = source.get("srcset") or source.get("data-srcset")
-            if not src and img:
-                src = img.get("src") or img.get("data-src") or img.get("data-lazy-src")
+                src = source.get("data-srcset") or source.get("srcset")
 
-            if not src:
+            # Then try img attributes (prioritize data-amsrc and other lazy loading attrs)
+            if not src and img:
+                src = (
+                    img.get("data-amsrc")
+                    or img.get("data-src")
+                    or img.get("data-lazy-src")
+                    or img.get("data-original")
+                )
+
+                # Only use src if it's not a data URI
+                if not src:
+                    img_src = img.get("src")
+                    if img_src and not img_src.startswith("data:"):
+                        src = img_src
+
+            if not src or src.startswith("data:"):
                 return None
 
             # If srcset, get first URL

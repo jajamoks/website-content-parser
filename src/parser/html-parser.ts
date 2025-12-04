@@ -86,7 +86,9 @@ export class HTMLParser {
     };
 
     // Try to find main content area first
-    let contentElement = $('main, [role="main"], article, .post-content, .blog-content, .entry-content, .content-area').first();
+    let contentElement = $(
+      'main, [role="main"], article, .post-content, .blog-content, .entry-content, .content-area, .blog__post-content-wrapper'
+    ).first();
 
     // If no main content area found, fall back to body
     if (contentElement.length === 0) {
@@ -229,11 +231,20 @@ export class HTMLParser {
 
       case 'img': {
         // Handle lazy loading: check multiple possible src attributes
-        let src = element.attr('src')
+        // Priority: data-amsrc, data-src, data-lazy-src, data-original, data-lazy, then src (but skip base64)
+        let src = element.attr('data-amsrc')
           || element.attr('data-src')
           || element.attr('data-lazy-src')
           || element.attr('data-original')
           || element.attr('data-lazy');
+
+        // Check src only if it's not a data URI
+        if (!src) {
+          const srcAttr = element.attr('src');
+          if (srcAttr && !srcAttr.startsWith('data:')) {
+            src = srcAttr;
+          }
+        }
 
         // If still no src, check srcset
         if (!src) {
@@ -244,7 +255,8 @@ export class HTMLParser {
           }
         }
 
-        if (!src || src.startsWith('data:image/svg')) return null;
+        // Filter out data URIs (base64, svg, etc.)
+        if (!src || src.startsWith('data:')) return null;
 
         return {
           id,
@@ -265,12 +277,26 @@ export class HTMLParser {
         const source = $picture.find('source').first();
         const img = $picture.find('img').first();
 
-        let src = source.attr('srcset') || source.attr('data-srcset');
-        if (!src) {
-          src = img.attr('src') || img.attr('data-src') || img.attr('data-lazy-src');
+        // Try source data-srcset first
+        let src = source.attr('data-srcset') || source.attr('srcset');
+
+        // Then try img attributes (prioritize data-amsrc and other lazy loading attrs)
+        if (!src && img.length) {
+          src = img.attr('data-amsrc')
+            || img.attr('data-src')
+            || img.attr('data-lazy-src')
+            || img.attr('data-original');
+
+          // Only use src if it's not a data URI
+          if (!src) {
+            const imgSrc = img.attr('src');
+            if (imgSrc && !imgSrc.startsWith('data:')) {
+              src = imgSrc;
+            }
+          }
         }
 
-        if (!src) return null;
+        if (!src || src.startsWith('data:')) return null;
 
         // If srcset, get first URL
         if (src.includes(',')) {
