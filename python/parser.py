@@ -530,6 +530,24 @@ class HTMLParser:
             )
             return container
 
+        # Common HTML5 container elements - preserve all children
+        elif tag_name in ["figure", "main", "header", "footer", "nav", "aside", "form", "fieldset", "details", "summary"]:
+            children = self._parse_element(element, depth + 1, block_id)
+            if not children:
+                return None
+
+            layout = self._detect_layout(element)
+            return ContainerBlock(
+                id=block_id,
+                type=BlockType.DIV,  # Treat as generic container
+                order=order,
+                parent=parent,
+                children=children,
+                layout=layout,
+                class_name=element.get("class"),
+                attributes=attributes,
+            )
+
         # Inline elements with standalone content
         elif tag_name in ["span", "a", "strong", "em", "b", "i"]:
             text = element.get_text().strip()
@@ -545,7 +563,7 @@ class HTMLParser:
             # Otherwise, recursively parse children
             return self._parse_element(element, depth + 1, parent)
 
-        # Other elements - parse children
+        # Other unknown elements - parse children
         else:
             return self._parse_element(element, depth + 1, parent)
 

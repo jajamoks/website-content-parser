@@ -432,6 +432,33 @@ export class HTMLParser {
         } as ArticleBlock;
       }
 
+      // Common HTML5 container elements - preserve all children
+      case 'figure':
+      case 'main':
+      case 'header':
+      case 'footer':
+      case 'nav':
+      case 'aside':
+      case 'form':
+      case 'fieldset':
+      case 'details':
+      case 'summary': {
+        const children = this.parseElement($, element, depth + 1, id);
+        if (children.length === 0) return null;
+
+        const layout = this.detectLayout(element);
+        return {
+          id,
+          type: 'div',  // Treat as generic container
+          children,
+          layout,
+          className: element.attr('class'),
+          order,
+          parent,
+          attributes,
+        } as DivBlock;
+      }
+
       case 'span':
       case 'a':
       case 'strong':
@@ -456,7 +483,7 @@ export class HTMLParser {
       }
 
       default: {
-        // For other elements, recursively parse children
+        // For other unknown elements, recursively parse children
         const children = this.parseElement($, element, depth + 1, parent);
         return children.length > 0 ? children[0] : null;
       }
