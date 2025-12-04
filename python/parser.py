@@ -150,9 +150,6 @@ class HTMLParser:
             "script",
             "style",
             "noscript",
-            "nav",
-            "footer",
-            "header",
         ]
         self.include_attributes = include_attributes
         self.block_counter = 0
@@ -161,7 +158,16 @@ class HTMLParser:
         """Fetch and parse HTML from a URL"""
         try:
             headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Accept-Encoding": "gzip, deflate, br",
+                "Connection": "keep-alive",
+                "Upgrade-Insecure-Requests": "1",
+                "Sec-Fetch-Dest": "document",
+                "Sec-Fetch-Mode": "navigate",
+                "Sec-Fetch-Site": "none",
+                "Cache-Control": "max-age=0",
             }
             response = requests.get(url, headers=headers, timeout=30)
             response.raise_for_status()
@@ -189,9 +195,17 @@ class HTMLParser:
             else Structure(layout=LayoutType.SINGLE)
         )
 
+        # Try to find main content area first
+        content_element = (
+            soup.find("main")
+            or soup.find(attrs={"role": "main"})
+            or soup.find("article")
+            or soup.find(class_=["post-content", "blog-content", "entry-content", "content-area"])
+            or soup.find("body")
+        )
+
         # Parse main content
-        body = soup.find("body")
-        blocks = self._parse_element(body, 0) if body else []
+        blocks = self._parse_element(content_element, 0) if content_element else []
 
         return ParsedContent(
             url=url,
@@ -326,9 +340,25 @@ class HTMLParser:
 
         # Image
         elif tag_name == "img":
-            src = element.get("src")
+            # Handle lazy loading: check multiple possible src attributes
+            src = (
+                element.get("src")
+                or element.get("data-src")
+                or element.get("data-lazy-src")
+                or element.get("data-original")
+                or element.get("data-lazy")
+            )
+
+            # If still no src, check srcset
             if not src:
+                srcset = element.get("srcset") or element.get("data-srcset")
+                if srcset:
+                    # Extract first URL from srcset
+                    src = srcset.split(",")[0].strip().split(" ")[0]
+
+            if not src or src.startswith("data:image/svg"):
                 return None
+
             return ImageBlock(
                 id=block_id,
                 type=BlockType.IMAGE,
@@ -338,6 +368,36 @@ class HTMLParser:
                 alt=element.get("alt"),
                 width=self._parse_int(element.get("width")),
                 height=self._parse_int(element.get("height")),
+                attributes=attributes,
+            )
+
+        # Picture elements
+        elif tag_name == "picture":
+            source = element.find("source")
+            img = element.find("img")
+
+            src = None
+            if source:
+                src = source.get("srcset") or source.get("data-srcset")
+            if not src and img:
+                src = img.get("src") or img.get("data-src") or img.get("data-lazy-src")
+
+            if not src:
+                return None
+
+            # If srcset, get first URL
+            if "," in src:
+                src = src.split(",")[0].strip().split(" ")[0]
+
+            return ImageBlock(
+                id=block_id,
+                type=BlockType.IMAGE,
+                order=order,
+                parent=parent,
+                src=src,
+                alt=img.get("alt") if img else None,
+                width=self._parse_int(img.get("width")) if img else None,
+                height=self._parse_int(img.get("height")) if img else None,
                 attributes=attributes,
             )
 
@@ -431,7 +491,36 @@ class HTMLParser:
             )
 
         # Containers
-        elif tag_name in ["div", "section", "article"]:
+        elif tag_name == "div":
+            children = self._parse_element(element, depth + 1, block_id)
+
+            # If no children found but div has direct text content, treat as paragraph
+            if not children:
+                text = element.get_text().strip()
+                if text and len(text) > 0:
+                    return ParagraphBlock(
+                        id=block_id,
+                        type=BlockType.PARAGRAPH,
+                        order=order,
+                        parent=parent,
+                        text=text,
+                        attributes=attributes,
+                    )
+                return None
+
+            layout = self._detect_layout(element)
+            return ContainerBlock(
+                id=block_id,
+                type=BlockType.DIV,
+                order=order,
+                parent=parent,
+                children=children,
+                layout=layout,
+                class_name=element.get("class"),
+                attributes=attributes,
+            )
+
+        elif tag_name in ["section", "article"]:
             children = self._parse_element(element, depth + 1, block_id)
             if not children:
                 return None
@@ -439,7 +528,7 @@ class HTMLParser:
             layout = self._detect_layout(element)
             container = ContainerBlock(
                 id=block_id,
-                type=BlockType(tag_name.upper() if tag_name != "div" else "DIV"),
+                type=BlockType(tag_name.upper()),
                 order=order,
                 parent=parent,
                 children=children,
@@ -448,6 +537,21 @@ class HTMLParser:
                 attributes=attributes,
             )
             return container
+
+        # Inline elements with standalone content
+        elif tag_name in ["span", "a", "strong", "em", "b", "i"]:
+            text = element.get_text().strip()
+            if text and len(text) > 20 and not parent:
+                return ParagraphBlock(
+                    id=block_id,
+                    type=BlockType.PARAGRAPH,
+                    order=order,
+                    parent=parent,
+                    text=text,
+                    attributes=attributes,
+                )
+            # Otherwise, recursively parse children
+            return self._parse_element(element, depth + 1, parent)
 
         # Other elements - parse children
         else:

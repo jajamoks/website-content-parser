@@ -27,7 +27,7 @@ export class HTMLParser {
       includeMetadata: options.includeMetadata ?? true,
       includeStructure: options.includeStructure ?? true,
       maxDepth: options.maxDepth ?? 10,
-      ignoreSelectors: options.ignoreSelectors ?? ['script', 'style', 'noscript', 'nav', 'footer', 'header'],
+      ignoreSelectors: options.ignoreSelectors ?? ['script', 'style', 'noscript'],
       includeAttributes: options.includeAttributes ?? true,
     };
   }
@@ -39,7 +39,16 @@ export class HTMLParser {
     try {
       const response = await axios.get(url, {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.9',
+          'Accept-Encoding': 'gzip, deflate, br',
+          'Connection': 'keep-alive',
+          'Upgrade-Insecure-Requests': '1',
+          'Sec-Fetch-Dest': 'document',
+          'Sec-Fetch-Mode': 'navigate',
+          'Sec-Fetch-Site': 'none',
+          'Cache-Control': 'max-age=0',
         },
         timeout: 30000,
       });
@@ -76,8 +85,16 @@ export class HTMLParser {
       hasSidebar: false,
     };
 
+    // Try to find main content area first
+    let contentElement = $('main, [role="main"], article, .post-content, .blog-content, .entry-content, .content-area').first();
+
+    // If no main content area found, fall back to body
+    if (contentElement.length === 0) {
+      contentElement = $('body');
+    }
+
     // Parse main content
-    const blocks = this.parseElement($, $('body'), 0);
+    const blocks = this.parseElement($, contentElement, 0);
 
     return {
       url,
@@ -211,8 +228,24 @@ export class HTMLParser {
       }
 
       case 'img': {
-        const src = element.attr('src');
-        if (!src) return null;
+        // Handle lazy loading: check multiple possible src attributes
+        let src = element.attr('src')
+          || element.attr('data-src')
+          || element.attr('data-lazy-src')
+          || element.attr('data-original')
+          || element.attr('data-lazy');
+
+        // If still no src, check srcset
+        if (!src) {
+          const srcset = element.attr('srcset') || element.attr('data-srcset');
+          if (srcset) {
+            // Extract first URL from srcset
+            src = srcset.split(',')[0].trim().split(' ')[0];
+          }
+        }
+
+        if (!src || src.startsWith('data:image/svg')) return null;
+
         return {
           id,
           type: 'image',
@@ -223,6 +256,37 @@ export class HTMLParser {
           order,
           parent,
           attributes,
+        } as ImageBlock;
+      }
+
+      case 'picture': {
+        // Handle picture elements
+        const $picture = element;
+        const source = $picture.find('source').first();
+        const img = $picture.find('img').first();
+
+        let src = source.attr('srcset') || source.attr('data-srcset');
+        if (!src) {
+          src = img.attr('src') || img.attr('data-src') || img.attr('data-lazy-src');
+        }
+
+        if (!src) return null;
+
+        // If srcset, get first URL
+        if (src.includes(',')) {
+          src = src.split(',')[0].trim().split(' ')[0];
+        }
+
+        return {
+          id,
+          type: 'image',
+          src,
+          alt: img.attr('alt'),
+          width: this.parseNumber(img.attr('width')),
+          height: this.parseNumber(img.attr('height')),
+          order,
+          parent,
+          attributes: this.options.includeAttributes ? this.getAttributes($picture) : {},
         } as ImageBlock;
       }
 
@@ -304,7 +368,22 @@ export class HTMLParser {
 
       case 'div': {
         const children = this.parseElement($, element, depth + 1, id);
-        if (children.length === 0) return null;
+
+        // If no children found but div has direct text content, treat as paragraph
+        if (children.length === 0) {
+          const text = element.text().trim();
+          if (text && text.length > 0) {
+            return {
+              id,
+              type: 'paragraph',
+              text,
+              order,
+              parent,
+              attributes,
+            } as ParagraphBlock;
+          }
+          return null;
+        }
 
         const layout = this.detectLayout(element);
         return {
@@ -351,6 +430,29 @@ export class HTMLParser {
           parent,
           attributes,
         } as ArticleBlock;
+      }
+
+      case 'span':
+      case 'a':
+      case 'strong':
+      case 'em':
+      case 'b':
+      case 'i': {
+        // For inline elements, check if they have significant standalone content
+        const text = element.text().trim();
+        if (text && text.length > 20 && !parent) {
+          return {
+            id,
+            type: 'paragraph',
+            text,
+            order,
+            parent,
+            attributes,
+          } as ParagraphBlock;
+        }
+        // Otherwise, recursively parse children
+        const children = this.parseElement($, element, depth + 1, parent);
+        return children.length > 0 ? children[0] : null;
       }
 
       default: {

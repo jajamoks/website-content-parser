@@ -5,10 +5,13 @@ A powerful TypeScript/Node.js HTML parser with a Next.js app for visualizing par
 ## Features
 
 - **Comprehensive HTML Parsing**: Extracts paragraphs, headings (H1-H6), videos, iframes, images, divs, lists, code blocks, and more
+- **Lazy-Loaded Image Support**: Automatically detects and extracts images from `data-src`, `data-lazy-src`, `data-original`, `srcset`, and `picture` elements
+- **Smart Content Detection**: Focuses on main content areas (main, article, .post-content) and ignores navigation/footer noise
 - **Structure Analysis**: Detects page layouts (single, multi-column, grid, flex)
 - **Metadata Extraction**: Captures title, description, Open Graph tags, and other metadata
 - **Block-Based Rendering**: Visualizes parsed content in a clean, structured format
 - **JSON Export**: Download parsed content as JSON for further processing
+- **Enhanced HTTP Headers**: Uses realistic browser headers to avoid 403 blocks
 - **TypeScript**: Fully typed for better developer experience
 - **Best Practices**: Uses Cheerio for parsing, Zod for validation, and follows modern TypeScript patterns
 
@@ -215,6 +218,9 @@ website-content-parser/
 5. **Modularity**: Separated concerns (parser, types, UI, API)
 6. **Extensibility**: Easy to add new block types and features
 7. **Testing Ready**: Clean architecture suitable for unit testing
+8. **Lazy Loading Support**: Handles all common lazy-loading patterns
+9. **Content Focus**: Prioritizes main content over navigation/footer elements
+10. **Picture Element Support**: Handles modern responsive image techniques
 
 ## Use Cases
 
@@ -225,12 +231,25 @@ website-content-parser/
 - **Archiving**: Preserve web content in structured format
 - **SEO Analysis**: Extract and analyze page metadata
 
+## Improvements (Latest Version)
+
+### v1.1.0 - Enhanced Image and Content Parsing
+
+- ✅ **Lazy-Loaded Images**: Now extracts images from `data-src`, `data-lazy-src`, `data-original`, `data-lazy` attributes
+- ✅ **Picture Elements**: Full support for `<picture>` elements with `<source>` tags and srcset
+- ✅ **Srcset Support**: Extracts URLs from srcset attributes for responsive images
+- ✅ **Smart Content Focus**: Automatically finds main content area (main, article, .post-content, .blog-content)
+- ✅ **Text in Divs**: Captures text content in divs without child elements
+- ✅ **Enhanced Headers**: Uses realistic browser headers to avoid bot detection
+- ✅ **Reduced Noise**: Only removes script/style/noscript, preserving potential blog content in headers/footers
+- ✅ **Python Parity**: Python implementation includes all the same improvements
+
 ## Limitations
 
-- JavaScript-rendered content requires the page to be pre-rendered
-- Some dynamic content may not be captured
+- JavaScript-rendered content requires the page to be pre-rendered (consider using Puppeteer for dynamic sites)
+- Some sites with aggressive bot protection may still block requests
 - Complex layouts may be simplified in the structure analysis
-- Large pages may hit depth limits (configurable)
+- Large pages may hit depth limits (configurable via maxDepth option)
 
 ## Future Enhancements
 
