@@ -38,3 +38,8 @@ test-*.html
 test-*.json
 src/parser/test-local.ts
 src/parser/analyze.ts
+src/parser/debug.ts
+
+# Debug files
+debug-*.html
+debug-*.json
